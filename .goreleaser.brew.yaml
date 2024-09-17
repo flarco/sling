@@ -12,20 +12,21 @@ before:
 
 builds:
   - main: ./cmd/sling
-    
+
     env:
       - CGO_ENABLED=1
-    
+
     tags:
       - fts5
 
     goarch:
       - amd64
       - arm64
-    
+
     goos:
       - darwin
-    
+      - linux
+
     ldflags:
       - "-X 'github.com/slingdata-io/sling-cli/core.Version={{.Version}}' -X 'github.com/slingdata-io/sling-cli/core/env.PlausibleURL={{.Env.PLAUSIBLE_URL}}' -X 'github.com/slingdata-io/sling-cli/core/env.SentryDsn={{.Env.SENTRY_DSN}}'"
 

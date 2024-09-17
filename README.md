@@ -113,7 +113,7 @@ $ sling conns discover LOCALHOST_DEV
 
 ## Installation
 
-#### Brew on Mac
+#### Brew on Mac or Linux
 
 ```shell
 brew install slingdata-io/sling/sling
