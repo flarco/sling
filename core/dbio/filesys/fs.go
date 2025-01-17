@@ -1160,6 +1160,142 @@ func GetDataflowViaDuckDB(fs FileSysClient, uri string, nodes FileNodes, cfg iop
 	return df, nil
 }
 
+// WriteDataflowViaDuckDB writes to parquet / csv via duckdb
+func WriteDataflowViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string) (bw int64, err error) {
+	folder := path.Join(env.GetTempFolder(), g.RandSuffix("duckdb", 3))
+	df.Defer(func() { env.RemoveAllLocalTempFile(folder) })
+
+	// export to local file
+	if err = os.MkdirAll(folder, 0755); err != nil {
+		err = g.Error(err, "Could not create temp output folder")
+		return bw, err
+	}
+
+	props := g.MapToKVArr(fs.Props())
+	duck := iop.NewDuckDb(context.Background(), props...)
+	duckURI := duck.PrepareFsSecretAndURI(uri)
+
+	sp := iop.NewStreamProcessor()
+	sp.SetConfig(fs.Client().Props())
+	sc := sp.Config
+
+	if val := fs.GetProp("COMPRESSION"); val != "" && sc.Compression == iop.NoneCompressorType {
+		sc.Compression = iop.CompressorType(strings.ToLower(val))
+	}
+
+	if val := fs.GetProp("FILE_MAX_BYTES"); val != "" && sc.FileMaxBytes == 0 {
+		sc.FileMaxBytes = cast.ToInt64(val)
+	}
+
+	if cast.ToInt64(fs.GetProp("FILE_MAX_ROWS")) > 0 {
+		g.Warn("splitting files with `file_max_rows` is not supported with duckdb, using `file_max_bytes = 16000000`")
+		sc.FileMaxBytes = 16000000
+	}
+
+	// merge into single stream to push into duckdb
+	duckSc := duck.DefaultCsvConfig()
+	duckSc.FileMaxRows = 0 // if we want to manually split by rows, multiple duck.Exec
+	streamPartChn, err := duck.DataflowToHttpStream(df, duckSc)
+	if err != nil {
+		return bw, g.Error(err)
+	}
+
+	fileFormat := dbio.FileType(strings.ToLower(cast.ToString(fs.GetProp("FORMAT"))))
+	if fileFormat == dbio.FileTypeNone {
+		fileFormat = InferFileFormat(uri)
+	}
+
+	streamDone := false
+	for streamPart := range streamPartChn {
+		if streamDone {
+			return bw, g.Error("stream has finished")
+		}
+
+		copyOptions := iop.DuckDbCopyOptions{
+			Format:        fileFormat,
+			Compression:   sc.Compression,
+			FileSizeBytes: sc.FileMaxBytes,
+		}
+
+		// if * is specified, set default FileSizeBytes,
+		if strings.Contains(uri, "*") && copyOptions.FileSizeBytes == 0 {
+			copyOptions.FileSizeBytes = 50 * 1024 * 1024 // 50MB default file size
+		}
+
+		// generate sql for export
+		switch fs.FsType() {
+		case dbio.TypeFileS3, dbio.TypeFileLocal:
+			// copy files bytes recursively to target
+			if strings.Contains(duckURI, "*") {
+				duckURI = GetDeepestParent(duckURI) // get target folder, since split by files
+				duckURI = strings.TrimRight(duckURI, "/")
+			}
+
+			// create the parent folder if needed
+			if fs.FsType() == dbio.TypeFileLocal {
+				parent := duckURI
+				if sc.FileMaxBytes == 0 {
+					parent = path.Dir(duckURI)
+				}
+				if err = os.MkdirAll(parent, 0755); err != nil {
+					err = g.Error(err, "Could not create output folder")
+					return bw, err
+				}
+			}
+
+			sql, err := duck.GenerateCopyStatement(streamPart.FromExpr, duckURI, copyOptions)
+			if err != nil {
+				err = g.Error(err, "Could not generate duckdb copy statement")
+				return bw, err
+			}
+			_, err = duck.Exec(sql)
+			if err != nil {
+				err = g.Error(err, "Could not write to file")
+				return bw, err
+			}
+
+			// get bytes written
+			if fs.FsType() == dbio.TypeFileLocal {
+				bw, _ = g.PathSize(duckURI)
+			} else {
+				path, _ := fs.GetPath(uri)
+				nodes, _ := fs.ListRecursive(path)
+				bw = cast.ToInt64(nodes.TotalSize())
+			}
+		default:
+			// copy to temp file locally, then upload
+			localPath := env.CleanWindowsPath(path.Join(folder, "output"))
+			sql, err := duck.GenerateCopyStatement(streamPart.FromExpr, localPath, copyOptions)
+			if err != nil {
+				err = g.Error(err, "Could not generate duckdb copy statement")
+				return bw, err
+			}
+
+			_, err = duck.Exec(sql)
+			if err != nil {
+				err = g.Error(err, "Could not write to file")
+				return bw, err
+			}
+
+			// copy files bytes recursively to target
+			if strings.Contains(uri, "*") {
+				uri = GetDeepestParent(uri) // get target folder, since split by files
+			}
+
+			written, err := CopyFromLocalRecursive(fs, localPath, uri)
+			if err != nil {
+				err = g.Error(err, "Could not write to file")
+				return bw, err
+			}
+			bw += written
+		}
+
+		streamDone = true // only 1 reader batch
+	}
+
+	return
+}
+
 // MakeDatastream create a datastream from a reader
 func MakeDatastream(reader io.Reader, cfg map[string]string) (ds *iop.Datastream, err error) {
 

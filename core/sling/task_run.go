@@ -113,7 +113,7 @@ func (t *TaskExecution) Execute() error {
 
 		g.DebugLow("Sling version: %s (%s %s)", core.Version, runtime.GOOS, runtime.GOARCH)
 		g.DebugLow("type is %s", t.Type)
-		g.Debug("using: %s", g.Marshal(g.M("mode", t.Config.Mode, "columns", t.Config.Target.Columns, "transforms", t.Config.Transforms)))
+		g.Debug("using: %s", g.Marshal(g.M("mode", t.Config.Mode, "columns", t.Config.Target.Columns, "transforms", t.Config.Transforms, "select", t.Config.Source.Select)))
 		g.Debug("using source options: %s", g.Marshal(t.Config.Source.Options))
 		g.Debug("using target options: %s", g.Marshal(t.Config.Target.Options))
 

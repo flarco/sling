@@ -212,7 +212,7 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 		if opts.Where != "" {
 			var where any
 			g.Unmarshal(opts.Where, &where)
-			m["where"] = where // json array or object
+			m["filter"] = where // json array or object
 		}
 
 		if len(fields) > 0 && fields[0] != "*" {
@@ -229,6 +229,8 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 
 	isSQLServer := g.In(t.Dialect, dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH)
 	startsWith := strings.HasPrefix(strings.TrimSpace(strings.ToLower(t.SQL)), "with")
+	whereClause := lo.Ternary(opts.Where != "", g.F(" where (%s)", opts.Where), "")
+	whereAnd := lo.Ternary(opts.Where != "", g.F(" and (%s)", opts.Where), "")
 
 	fields = lo.Map(fields, func(f string, i int) string {
 		q := GetQualifierQuote(t.Dialect)
@@ -245,6 +247,50 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 	}
 
 	fieldsStr := lo.Ternary(len(fields) > 0, strings.Join(fields, ", "), "*")
+
+	// auto convert to json if needed
+	{
+		switch t.Dialect {
+		case dbio.TypeDbBigQuery:
+			var toJsonCols iop.Columns
+
+			for _, col := range t.Columns {
+				dtType := strings.ToLower(col.DbType)
+				if strings.HasPrefix(dtType, "array") ||
+					strings.HasPrefix(dtType, "record") ||
+					strings.HasPrefix(dtType, "struct") {
+					toJsonCols = append(toJsonCols, col)
+				}
+			}
+
+			if len(fields) == 0 {
+				replaceExprs := []string{}
+				for _, col := range toJsonCols {
+					colQ := t.Dialect.Quote(col.Name)
+					expr := g.F("safe.parse_json(to_json_string(%s)) as %s", colQ, colQ)
+					replaceExprs = append(replaceExprs, expr)
+				}
+				if len(replaceExprs) > 0 {
+					// append replace
+					fieldsStr = g.F("* replace(%s)", strings.Join(replaceExprs, ", "))
+				}
+			} else {
+				fieldsExprs := []string{}
+				for _, field := range opts.Fields {
+					field = strings.TrimSpace(field)
+					colQ := t.Dialect.Quote(field)
+					if col := toJsonCols.GetColumn(field); col != nil {
+						expr := g.F("safe.parse_json(to_json_string(%s)) as %s", colQ, colQ)
+						fieldsExprs = append(fieldsExprs, expr)
+					} else {
+						fieldsExprs = append(fieldsExprs, colQ)
+					}
+				}
+				fieldsStr = strings.Join(fieldsExprs, ", ")
+			}
+		}
+	}
+
 	if t.IsQuery() {
 		if len(fields) > 0 && !(len(fields) == 1 && fields[0] == "*") && !(isSQLServer && startsWith) {
 			sql = g.F("select %s from (\n%s\n) t", fieldsStr, t.SQL)
@@ -269,6 +315,9 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 			sql = g.R(
 				template.Core["limit_sql"],
 				"sql", sql,
+				"where_cond", opts.Where,
+				"where_clause", whereClause,
+				"where_and", whereAnd,
 				"limit", cast.ToString(limit),
 				"offset", cast.ToString(offset),
 			)
@@ -278,6 +327,9 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 				template.Core[key],
 				"fields", fieldsStr,
 				"table", t.FDQN(),
+				"where_cond", opts.Where,
+				"where_clause", whereClause,
+				"where_and", whereAnd,
 				"limit", cast.ToString(limit),
 				"offset", cast.ToString(offset),
 			)
@@ -288,7 +340,9 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 	sql = g.R(sql,
 		"limit", cast.ToString(limit),
 		"offset", cast.ToString(offset),
-		"where", opts.Where,
+		"where_cond", opts.Where,
+		"where_clause", whereClause,
+		"where_and", whereAnd,
 	)
 
 	return

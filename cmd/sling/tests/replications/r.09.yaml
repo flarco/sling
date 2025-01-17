@@ -4,11 +4,12 @@ target: sqlite
 defaults:
   mode: full-refresh
   object: 'main.pg_{stream_table}'
-  sql: "select *, 'hi' there from {stream_name} limit 10"
+  sql: "select *, 'hi' there from {stream_name} {where_clause} limit 10"
 
 streams:
   public.my_table?:
     tags: [ my_table ]
+    where: '2 > 1'
   public.my_table:
     hooks:
       pre:

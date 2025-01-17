@@ -24,8 +24,8 @@ core:
           select 1 from {temp_table} 
           where {join_where}
       )
-  limit: select {fields} from {table} limit {limit} offset {offset}
-  limit_offset: select {fields} from {table} limit {limit}
+  limit: select {fields} from {table}{where_clause} limit {limit} offset {offset}
+  limit_offset: select {fields} from {table}{where_clause} limit {limit}
   limit_sql: |
     select * from (
       {sql}
@@ -41,9 +41,9 @@ core:
   column_names: '{sql}'
   enable_trigger: ALTER TABLE {table} ENABLE TRIGGER {trigger}
   disable_trigger: ALTER TABLE {table} DISABLE TRIGGER {trigger}
-  incremental_select: select {fields} from {table} where {incremental_where_cond} order by {update_key} asc
-  incremental_select_limit: select {fields} from {table} where {incremental_where_cond} order by {update_key} asc limit {limit}
-  incremental_select_limit_offset: select {fields} from {table} where {incremental_where_cond} order by {update_key} asc limit {limit} offset {offset}
+  incremental_select: select {fields} from {table} where ({incremental_where_cond}){where_and} order by {update_key} asc
+  incremental_select_limit: select {fields} from {table} where ({incremental_where_cond}){where_and} order by {update_key} asc limit {limit}
+  incremental_select_limit_offset: select {fields} from {table} where ({incremental_where_cond}){where_and} order by {update_key} asc limit {limit} offset {offset}
   incremental_where: '{update_key} {gt} {value}'
   backfill_where: '{update_key} >= {start_value} and {update_key} <= {end_value}'
 

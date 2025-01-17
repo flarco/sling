@@ -47,11 +47,11 @@ core:
       select 1 from DUAL
   insert_option: /*+ APPEND NOLOGGING */
   sample: select {fields} from {table} SAMPLE(50) where rownum <= {n}
-  limit: select {fields} from {table} where rownum <= {limit}
-  limit_offset: select {fields} from {table} order by 1 offset {offset} rows fetch next {limit} rows only
+  limit: select {fields} from {table} where rownum <= {limit}{where_and}
+  limit_offset: select {fields} from {table}{where_clause} order by 1 offset {offset} rows fetch next {limit} rows only
   limit_sql: select * from ( {sql} ) where rownum <= {limit}
-  incremental_select_limit: select {fields} from {table} where rownum <= {limit} and ({incremental_where_cond}) order by {update_key} asc
-  incremental_select_limit_offset: select {fields} from {table} where rownum <= {limit} and ({incremental_where_cond}) order by {update_key} asc offset {offset} rows fetch next {limit} rows only
+  incremental_select_limit: select {fields} from {table} where rownum <= {limit}{where_and} and ({incremental_where_cond}) order by {update_key} asc
+  incremental_select_limit_offset: select {fields} from {table} where rownum <= {limit}{where_and} and ({incremental_where_cond}) order by {update_key} asc offset {offset} rows fetch next {limit} rows only
   replace: |
     merge into {table} tgt
     using (select {name_values}

@@ -21,6 +21,7 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/flarco/g"
 	"github.com/flarco/g/net"
+	mssql "github.com/microsoft/go-mssqldb"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 	"github.com/xo/dburl"
@@ -77,6 +78,20 @@ func (conn *MsSQLServerConn) GetURL(newURL ...string) string {
 	}
 
 	return url.String()
+}
+
+type SqlServerLogger struct{}
+
+func (l *SqlServerLogger) Printf(format string, v ...any) {
+	env.Print(g.F(format, v...))
+}
+func (l *SqlServerLogger) Println(v ...any) {
+	if len(v) == 1 {
+		env.Println(cast.ToString(v[0]))
+	}
+	if len(v) > 1 {
+		env.Println(g.F(cast.ToString(v[0]), v...))
+	}
 }
 
 func (conn *MsSQLServerConn) ConnString() string {
@@ -166,6 +181,10 @@ func (conn *MsSQLServerConn) ConnString() string {
 		if val := conn.GetProp(key); val != "" {
 			U.SetParam(new_key, val)
 		}
+	}
+
+	if val := conn.GetProp("log"); val != "" {
+		mssql.SetLogger(&SqlServerLogger{})
 	}
 
 	return U.String()

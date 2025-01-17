@@ -20,11 +20,11 @@ core:
   sample: select {fields} from {table} TABLESAMPLE SYSTEM (50) limit {n}
   rename_table: ALTER TABLE {table} RENAME TO {new_table}
   rename_column: EXEC sp_rename '{table}.{column}', '{new_column}', 'COLUMN'
-  limit: select top {limit} {fields} from {table}
-  limit_offset: select top {limit} * from ( select {fields} from {table} order by 1 offset {offset} rows) as t
+  limit: select top {limit} {fields} from {table}{where_clause}
+  limit_offset: select top {limit} * from ( select {fields} from {table}{where_clause} order by 1 offset {offset} rows) as t
   limit_sql: select top {limit} * from ( {sql} ) as t
-  incremental_select_limit: select top {limit} {fields} from {table} where {incremental_where_cond} order by {update_key} asc
-  incremental_select_limit_offset: select top {limit} * from ( select {fields} from {table}  where {incremental_where_cond} order by {update_key} asc offset {offset} rows) as t
+  incremental_select_limit: select top {limit} {fields} from {table} where ({incremental_where_cond}){where_and} order by {update_key} asc
+  incremental_select_limit_offset: select top {limit} * from ( select {fields} from {table}  where ({incremental_where_cond}){where_and} order by {update_key} asc offset {offset} rows) as t
   bulk_insert: |
     BULK INSERT {table}
     from '/dev/stdin'

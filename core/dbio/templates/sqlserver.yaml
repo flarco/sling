@@ -15,11 +15,11 @@ core:
     update {table} as t1 set {set_fields2}
     from (select * from {temp_table}) as t2
     where {pk_fields_equal}
-  limit: select top {limit} {fields} from {table}
-  limit_offset: select top {limit} * from ( select {fields} from {table} order by 1 offset {offset} rows) as t
+  limit: select top {limit} {fields} from {table}{where_clause}
+  limit_offset: select top {limit} * from ( select {fields} from {table}{where_clause} order by 1 offset {offset} rows) as t
   limit_sql: select top {limit} * from ( {sql} ) as t
-  incremental_select_limit: select top {limit} {fields} from {table} where {incremental_where_cond} order by {update_key} asc
-  incremental_select_limit_offset: select top {limit} * from ( select {fields} from {table}  where {incremental_where_cond} order by {update_key} asc offset {offset} rows) as t
+  incremental_select_limit: select top {limit} {fields} from {table} where ({incremental_where_cond}){where_and} order by {update_key} asc
+  incremental_select_limit_offset: select top {limit} * from ( select {fields} from {table}  where ({incremental_where_cond}){where_and} order by {update_key} asc offset {offset} rows) as t
   insert: insert into {table} ({cols}) values ({values})
   insert_temp: insert into {table} ({cols}) select {cols} from {temp_table}
   insert_ignore: insert into {table} ({fields}) values ({values}) on conflict ({pk_fields}) do nothing

@@ -280,7 +280,7 @@ func ParseURLType(uri string) (uType dbio.Type, host string, path string, err er
 	}
 
 	// handle azure blob
-	if scheme == "https" && strings.HasSuffix(host, ".blob.core.windows.net") {
+	if scheme == "https" && strings.HasSuffix(host, ".core.windows.net") {
 		return dbio.TypeFileAzure, host, path, nil
 	} else if scheme == "https" && strings.Contains(uri, "docs.google.com/spreadsheets") {
 		return dbio.TypeFileHTTP, host, path, nil

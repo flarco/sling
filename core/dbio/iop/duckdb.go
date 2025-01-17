@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path"
@@ -17,6 +18,7 @@ import (
 	"github.com/flarco/g"
 	"github.com/flarco/g/net"
 	"github.com/flarco/g/process"
+	"github.com/labstack/echo/v4"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/env"
@@ -24,7 +26,7 @@ import (
 )
 
 var (
-	DuckDbVersion      = "1.1.1"
+	DuckDbVersion      = "1.1.3"
 	DuckDbUseTempFile  = false
 	duckDbReadOnlyHint = "/* -readonly */"
 	duckDbSOFMarker    = "___start_of_duckdb_result___"
@@ -104,6 +106,10 @@ func (duck *DuckDb) AddExtension(extension string) {
 func (duck *DuckDb) PrepareFsSecretAndURI(uri string) string {
 	scheme := dbio.Type(strings.Split(uri, "://")[0])
 
+	if scheme == "https" && strings.Contains(uri, ".core.windows.net/") {
+		scheme = dbio.TypeFileAzure
+	}
+
 	fsProps := map[string]string{}
 	g.Unmarshal(duck.GetProp("fs_props"), &fsProps)
 
@@ -174,6 +180,13 @@ func (duck *DuckDb) PrepareFsSecretAndURI(uri string) string {
 			"ACCOUNT":  "ACCOUNT_NAME",
 		}
 		secretProps = append(secretProps, "TYPE AZURE")
+
+		if strings.Contains(uri, ".blob.core.windows.net/") {
+			uri = strings.ReplaceAll(uri, "https://", "az://")
+		}
+		if strings.Contains(uri, ".dfs.core.windows.net/") {
+			uri = strings.ReplaceAll(uri, "https://", "abfss://")
+		}
 	}
 
 	// populate secret props and make secret sql
@@ -776,7 +789,7 @@ func (duck *DuckDb) GenerateCopyStatement(fromTable, toLocalPath string, options
 
 	fileSizeBytesExpr := ""
 	if options.FileSizeBytes > 0 {
-		fileSizeBytesExpr = g.F("file_size_bytes %d,", options.FileSizeBytes)
+		fileSizeBytesExpr = g.F("per_thread_output true, file_size_bytes %d,", options.FileSizeBytes)
 	}
 
 	if len(partExpressions) > 0 {
@@ -953,6 +966,7 @@ func (duck *DuckDb) Describe(query string) (columns Columns, err error) {
 		col.DbType = cast.ToString(rec["column_type"])
 		col.Type = NativeTypeToGeneral(col.Name, cast.ToString(rec["column_type"]), dbio.TypeDbDuckDb)
 		col.Position = k + 1
+		col.Sourced = true
 
 		columns = append(columns, col)
 	}
@@ -980,6 +994,112 @@ func (duck *DuckDb) GetScannerFunc(format dbio.FileType) (scanFunc string) {
 	}
 
 	return
+}
+
+type HttpStreamPart struct {
+	Index    int
+	FromExpr string
+}
+
+func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamPartChn chan HttpStreamPart, err error) {
+	// create fromExprChn channel
+	streamPartChn = make(chan HttpStreamPart)
+
+	// start local http server
+	port, err := g.GetPort("localhost:0")
+	if err != nil {
+		err = g.Error(err, "could not acquire local port for duckdb http import")
+		return streamPartChn, err
+	}
+	// create reader channel to pass between handler and main flow
+	readerCh := make(chan io.Reader, 1)
+
+	// create http server to serve data
+	importContext := g.NewContext(duck.Context.Ctx)
+	httpURL := g.F("http://localhost:%d/data", port)
+	server := echo.New()
+	{
+		server.HidePort = true
+		server.HideBanner = true
+		// server.Use(middleware.Logger())
+		server.Add(http.MethodGet, "/data", func(c echo.Context) (err error) {
+			select {
+			case reader := <-readerCh:
+				if reader != nil {
+					return c.Stream(200, "text/csv", reader)
+				}
+			default:
+			}
+			return c.NoContent(http.StatusOK)
+		})
+
+		server.Add(http.MethodHead, "/data", func(c echo.Context) error {
+			c.Response().Header().Set("Content-Type", "text/csv")
+			return c.NoContent(http.StatusOK)
+		})
+
+		// start server in background, wait for it to start
+		importContext.Wg.Read.Add()
+		go func() {
+			g.Debug("started %s for duckdb direct stream", httpURL)
+			importContext.Wg.Read.Done()
+			if err := server.Start(g.F("localhost:%d", port)); err != http.ErrServerClosed {
+				g.Error(err, "duckdb import http server error")
+			}
+		}()
+	}
+
+	// wait for local server startup
+	importContext.Wg.Read.Wait()
+	time.Sleep(100 * time.Millisecond)
+	df.Defer(func() { server.Shutdown(importContext.Ctx) })
+
+	df.SetBatchLimit(sc.BatchLimit)
+	ds := MergeDataflow(df)
+
+	go func() {
+		defer close(streamPartChn)
+		var partIndex int
+		for batchR := range ds.NewCsvReaderChnl(sc) {
+			g.Trace("processing duckdb batch %s", batchR.Batch.ID())
+			readerCh <- batchR.Reader
+
+			// can use this as a from table
+			fromExpr := g.F(`read_csv('%s', delim=',', header=True, columns=%s, max_line_size=134217728, parallel=false, quote='"', escape='"', nullstr='\N')`, httpURL, duck.GenerateCsvColumns(batchR.Columns))
+
+			streamPartChn <- HttpStreamPart{Index: partIndex, FromExpr: fromExpr}
+			partIndex++
+		}
+	}()
+
+	return streamPartChn, nil
+}
+
+func (duck *DuckDb) DefaultCsvConfig() (config StreamConfig) {
+	config = DefaultStreamConfig()
+	config.FileMaxRows = 250000
+	config.Header = true
+	config.Delimiter = ","
+	config.Escape = `"`
+	config.Quote = `"`
+	config.NullAs = `\N`
+	config.DatetimeFormat = dbio.TypeDbDuckDb.GetTemplateValue("variable.timestampz_layout")
+	return config
+}
+
+func (duck *DuckDb) GenerateCsvColumns(columns Columns) (colStr string) {
+	// {'FlightDate': 'DATE', 'UniqueCarrier': 'VARCHAR', 'OriginCityName': 'VARCHAR', 'DestCityName': 'VARCHAR'}
+
+	colsArr := make([]string, len(columns))
+	for i, col := range columns {
+		nativeType, err := col.GetNativeType(dbio.TypeDbDuckDb)
+		if err != nil {
+			g.Warn(err.Error())
+		}
+		colsArr[i] = g.F("'%s':'%s'", col.Name, nativeType)
+	}
+
+	return "{" + strings.Join(colsArr, ", ") + "}"
 }
 
 func (duck *DuckDb) MakeScanQuery(format dbio.FileType, uri string, fsc FileStreamConfig) (sql string) {

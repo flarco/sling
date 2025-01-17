@@ -337,30 +337,11 @@ func (conn *DuckDbConn) importViaHTTP(tableFName string, df *iop.Dataflow) (coun
 }
 
 func (conn *DuckDbConn) defaultCsvConfig() (config iop.StreamConfig) {
-	config = iop.DefaultStreamConfig()
-	config.FileMaxRows = 250000
-	config.Header = true
-	config.Delimiter = ","
-	config.Escape = `"`
-	config.Quote = `"`
-	config.NullAs = `\N`
-	config.DatetimeFormat = conn.Type.GetTemplateValue("variable.timestampz_layout")
-	return config
+	return conn.duck.DefaultCsvConfig()
 }
 
 func (conn *DuckDbConn) generateCsvColumns(columns iop.Columns) (colStr string) {
-	// {'FlightDate': 'DATE', 'UniqueCarrier': 'VARCHAR', 'OriginCityName': 'VARCHAR', 'DestCityName': 'VARCHAR'}
-
-	colsArr := make([]string, len(columns))
-	for i, col := range columns {
-		nativeType, err := conn.GetNativeType(col)
-		if err != nil {
-			g.Warn(err.Error())
-		}
-		colsArr[i] = g.F("'%s':'%s'", col.Name, nativeType)
-	}
-
-	return "{" + strings.Join(colsArr, ", ") + "}"
+	return conn.duck.GenerateCsvColumns(columns)
 }
 
 // GenerateUpsertSQL generates the upsert SQL

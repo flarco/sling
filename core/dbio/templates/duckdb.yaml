@@ -16,7 +16,7 @@ core:
       from {table}
     ) TO '{local_path}' 
     (
-      format '{format}', {file_size_bytes_expr} {file_extension_expr}
+      format '{format}', overwrite true, {file_size_bytes_expr} {file_extension_expr}
       compression '{compression}'
     )
   export_to_local_partitions: |

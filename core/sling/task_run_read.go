@@ -157,6 +157,14 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 				"incremental_value", cfg.IncrementalVal,
 			)
 		}
+
+		// fill in the where clause
+		cfg.Source.Where = g.R(
+			cfg.Source.Where,
+			"incremental_where_cond", incrementalWhereCond,
+			"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
+			"incremental_value", cfg.IncrementalVal,
+		)
 	}
 
 	if srcConn.GetType() == dbio.TypeDbBigTable {
@@ -166,10 +174,10 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	sTable.SQL = g.R(sTable.SQL, "incremental_where_cond", "1=1") // if running non-incremental mode
 	sTable.SQL = g.R(sTable.SQL, "incremental_value", "null")     // if running non-incremental mode
 
-	// construct select statement for selected fields
-	if selectFieldsStr != "*" || cfg.Source.Limit() > 0 {
+	// construct select statement for selected fields or where condition
+	if selectFieldsStr != "*" || cfg.Source.Where != "" || cfg.Source.Limit() > 0 {
 		sTable.SQL = sTable.Select(database.SelectOptions{
-			Fields: strings.Split(selectFieldsStr, ","),
+			Fields: strings.Split(selectFieldsStr, ", "),
 			Where:  cfg.Source.Where,
 			Limit:  cfg.Source.Limit(),
 			Offset: cfg.Source.Offset(),

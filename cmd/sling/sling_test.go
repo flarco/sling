@@ -283,6 +283,9 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 			streamConfig["sql"] = g.String(streamName)
 			streamName = testName
 		}
+		if where, ok := sourceOptions["where"]; ok {
+			streamConfig["where"] = where
+		}
 
 		replicationConfig := g.M(
 			"source", cast.ToString(rec["source_conn"]),

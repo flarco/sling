@@ -7,3 +7,4 @@ defaults:
 streams:
   oracle.TEST1K_ORACLE_WIDE:
     object: /tmp/test.csv
+    where: '2 > 1'

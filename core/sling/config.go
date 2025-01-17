@@ -633,8 +633,9 @@ func (cfg *Config) Prepare() (err error) {
 		return g.Error(err, "could not get format map for sql")
 	}
 
-	// sql prop
-	cfg.Source.Query = g.Rm(cfg.Source.Query, fMap)
+	// sql & where prop
+	cfg.Source.Where = g.Rm(cfg.Source.Where, fMap)
+	cfg.Source.Query = g.R(g.Rm(cfg.Source.Query, fMap), "where_cond", cfg.Source.Where)
 	if cfg.ReplicationStream != nil {
 		cfg.ReplicationStream.SQL = cfg.Source.Query
 	}
@@ -736,6 +737,15 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		// fill in temp table name if specified
 		if tgtOpts := cfg.Target.Options; tgtOpts != nil {
 			tgtOpts.TableTmp = strings.TrimSpace(g.Rm(tgtOpts.TableTmp, m))
+			if tgtOpts.TableTmp != "" {
+				tableTmp, err := database.ParseTableName(tgtOpts.TableTmp, cfg.TgtConn.Type)
+				if err != nil {
+					return g.Error(err, "could not parse temp table name")
+				} else if tableTmp.Schema == "" {
+					tableTmp.Schema = cast.ToString(cfg.Target.Data["schema"])
+				}
+				tgtOpts.TableTmp = tableTmp.FullName()
+			}
 		}
 	}
 

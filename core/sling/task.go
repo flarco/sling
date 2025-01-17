@@ -418,12 +418,13 @@ func (t *TaskExecution) Cleanup() {
 }
 
 // shouldWriteViaDuckDB determines whether we should use duckdb
-// at the moment, use duckdb only for partitioned target parquet or csv files
+// at the moment, use duckdb only for parquet or partitioned
+// target parquet or csv files
 func (t *TaskExecution) shouldWriteViaDuckDB(uri string) bool {
-	if g.In(t.Config.Target.ObjectFileFormat(), dbio.FileTypeParquet, dbio.FileTypeCsv) {
-		return len(iop.ExtractPartitionFields(uri)) > 0
+	if g.In(t.Config.Target.ObjectFileFormat(), dbio.FileTypeParquet, dbio.FileTypeCsv) && len(iop.ExtractPartitionFields(uri)) > 0 {
+		return true
 	}
-	return false
+	return g.In(t.Config.Target.ObjectFileFormat(), dbio.FileTypeParquet)
 }
 
 // isIncrementalWithUpdateKey means it has an update_key and is incremental mode

@@ -56,7 +56,11 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 		// use duckdb for writing parquet
 		if t.shouldWriteViaDuckDB(uri) {
 			// push to temp duck file
-			bw, err = writeDataflowViaDuckDB(t, df, fs, uri)
+			if len(iop.ExtractPartitionFields(uri)) > 0 {
+				bw, err = writeDataflowViaTempDuckDB(t, df, fs, uri)
+			} else {
+				bw, err = filesys.WriteDataflowViaDuckDB(fs, df, uri)
+			}
 		} else {
 			bw, err = filesys.WriteDataflow(fs, df, uri)
 		}
@@ -836,9 +840,9 @@ func truncateTable(t *TaskExecution, tgtConn database.Connection, tableName stri
 	return nil
 }
 
-// writeDataflowViaDuckDB is to use a temporary duckdb, especially for writing parquet files.
+// writeDataflowViaTempDuckDB is to use a temporary duckdb, especially for writing parquet files.
 // duckdb has the best parquet file writer, also allows partitioning
-func writeDataflowViaDuckDB(t *TaskExecution, df *iop.Dataflow, fs filesys.FileSysClient, uri string) (bw int64, err error) {
+func writeDataflowViaTempDuckDB(t *TaskExecution, df *iop.Dataflow, fs filesys.FileSysClient, uri string) (bw int64, err error) {
 	// push to temp duck file
 	var duckConn database.Connection
 
